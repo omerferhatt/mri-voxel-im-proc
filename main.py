@@ -413,8 +413,41 @@ if __name__ == "__main__":
 
     # ---------------------------- Part 4 - Simple 2D Registration  ---------------------------- #
     # -------- Section 1 - Translation
-    z_new = translation(MRI_images[1], 0, 0)
+    z_new = translation(MRI_images[1], 10, 10)
 
     save_path_translation = "output/registration/translation.png"
     plot_translation(MRI_images[1], z_new, save_path_translation)
     # -------- Section 2 - 2D registration with translation
+
+    reference = MRI_images[0]
+
+    for image_index, target in enumerate(MRI_images[1:]):
+        # Step locations
+        pos_left_down = (-1, -1)
+        pos_left_up = (-1, 1)
+        pos_right_down = (1, -1)
+        pos_right_up = (1, 1)
+        pos = (pos_left_down, pos_left_up, pos_right_down, pos_right_up)
+        total_step = 1000
+        # Calculating init SSD
+        ssd_hist = [np.float64(SSD(reference, target))]
+        multiplier = 1
+        for step in range(total_step):
+            ssd_local = []
+            for p in pos:
+                target_test = translation(target, 0 + p[0], 0 + p[1])
+                ssd_local.append(SSD(reference, target_test))
+
+            direction_index = np.argmin(ssd_local)
+            ssd_hist.append(ssd_local[direction_index])
+            target = translation(target, 0 + pos[direction_index][0], 0 + pos[direction_index][1])
+            if step != 0 and step % 20 == 0:
+                if ssd_hist[-1] == ssd_hist[-3] or ssd_hist[-2] == ssd_hist[-4]:
+                    if multiplier > 0.1:
+                        multiplier *= 0.5
+                        pos *= multiplier
+        save_path_compare_trans = f"output/registration/MRI1_MRI{2+image_index}_{step}step.png"
+        plot_translation(reference, target, save_path_compare_trans)
+
+
+
