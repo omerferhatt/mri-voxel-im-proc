@@ -231,6 +231,60 @@ def translation(arr, p, q):
     return z
 
 
+def rotation(arr, p, q):
+    pass
+
+
+# -------- Optimization Functions -------- #
+# - Basic min loss find func
+
+def find_min_SSD(func, ref, target, vectors, tot_step=1000, rate=0.5, multiplier=1):
+    try:
+        if not (func == 'translation' or func == 'rotation'):
+            raise TypeError
+    except TypeError as err:
+        print('Only `translation` or `rotation` keywords supported for this function')
+        print('`translation` keyword going to be used in this function for now')
+
+    ssd_hist = [np.float64(SSD(ref, target))]
+    for step in range(tot_step):
+        ssd_local = []
+        for pos in vectors:
+            if func == 'translation':
+                target_test = translation(target, 0 + pos[0], 0 + pos[1])
+            else:
+                target_test = rotation(_, _, _)
+            ssd_local.append(SSD(ref, target_test))
+
+        direction_index = np.argmin(ssd_local)
+        ssd_hist.append(ssd_local[direction_index])
+        if func == 'translation':
+            target = translation(target, 0 + pos[direction_index][0], 0 + pos[direction_index][1])
+        else:
+            target = rotation(_, _, _)
+
+        if step != 0 and step % 20 == 0:
+            if np.isclose(ssd_hist[-1], ssd_hist[-3]) or np.isclose(ssd_hist[-2], ssd_hist[-4]):
+                if multiplier > 0.1:
+                    multiplier *= rate
+                    pos *= multiplier
+    return ssd_hist, target
+
+
+def create_pos_vector():
+    pos_left_down = (-1, -1)
+    pos_left_up = (-1, 1)
+    pos_right_down = (1, -1)
+    pos_right_up = (1, 1)
+    return pos_left_down, pos_left_up, pos_right_down, pos_right_up
+
+
+def create_rot_degree():
+    rot_left = (2*np.pi)//16
+    rot_right = -rot_left
+    return rot_left, rot_right
+
+
 # -------- File Manipulation and Read Functions -------- #
 # - Reading images from paths
 # - Checking 3rd dimension
@@ -285,6 +339,7 @@ def rgb_to_gray(arr):
 # - Plotting mesh and rigid scatter
 # - Plotting mesh and affine scatter
 # - Plotting translation
+# - Plotting rotation (alias of translation)
 
 def create_mesh_elements(x_range, y_range, z_range):
     x = [a for a in range(x_range)]
@@ -347,12 +402,15 @@ def plot_mesh_affine_scatter(x, y, z, x1, y1, z1, save=None):
 
 def plot_translation(arr1, arr2, save=None):
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].imshow(arr1)
-    ax[1].imshow(arr2)
+    ax[0].imshow(arr1, cmap="gray")
+    ax[1].imshow(arr2, cmap="gray")
     if save is not None:
         plt.savefig(save, dpi=600)
     plt.show()
 
+
+# Creating alias for rotation plotting
+plot_rotation = plot_translation
 
 if __name__ == "__main__":
     # ----------------------------  Initialize ---------------------------- #
@@ -412,42 +470,35 @@ if __name__ == "__main__":
     plot_mesh_affine_scatter(x, y, z, x_affine, y_affine, z_affine, save_path_mesh_affine)
 
     # ---------------------------- Part 4 - Simple 2D Registration  ---------------------------- #
+    # Selecting image number randomly
+    im_no = 1
+
     # -------- Section 1 - Translation
-    z_new = translation(MRI_images[1], 10, 10)
+    trans_new = translation(MRI_images[im_no], 10, 10)
+    save_path_translation = f"output/registration/translation{im_no}.png"
+    plot_translation(MRI_images[im_no], trans_new, save_path_translation)
 
-    save_path_translation = "output/registration/translation.png"
-    plot_translation(MRI_images[1], z_new, save_path_translation)
-    # -------- Section 2 - 2D registration with translation
+    # -------- Section 2 - Rotation
+    rot_new = rotation(_, _, _)
+    save_path_rotation = f"output/registration/rotation_MRI{im_no}.png"
+    plot_rotation(MRI_images[im_no], rot_new, save_path_translation)
 
+    # -------- Section 3 - 2D registrations
     reference = MRI_images[0]
+    targets = MRI_images[1:]
+    total_step = 1000
 
-    for image_index, target in enumerate(MRI_images[1:]):
-        # Step locations
-        pos_left_down = (-1, -1)
-        pos_left_up = (-1, 1)
-        pos_right_down = (1, -1)
-        pos_right_up = (1, 1)
-        pos = (pos_left_down, pos_left_up, pos_right_down, pos_right_up)
-        total_step = 1000
-        # Calculating init SSD
-        ssd_hist = [np.float64(SSD(reference, target))]
-        multiplier = 1
-        for step in range(total_step):
-            ssd_local = []
-            for p in pos:
-                target_test = translation(target, 0 + p[0], 0 + p[1])
-                ssd_local.append(SSD(reference, target_test))
+    # - Translation and Rotation
+    vec = create_pos_vector()
+    deg = create_rot_degree()
 
-            direction_index = np.argmin(ssd_local)
-            ssd_hist.append(ssd_local[direction_index])
-            target = translation(target, 0 + pos[direction_index][0], 0 + pos[direction_index][1])
-            if step != 0 and step % 20 == 0:
-                if ssd_hist[-1] == ssd_hist[-3] or ssd_hist[-2] == ssd_hist[-4]:
-                    if multiplier > 0.1:
-                        multiplier *= 0.5
-                        pos *= multiplier
-        save_path_compare_trans = f"output/registration/MRI1_MRI{2+image_index}_{step}step.png"
-        plot_translation(reference, target, save_path_compare_trans)
+    for image_index, target in enumerate(targets):
+        ssd_hist_trans, relocated_target = find_min_SSD('translation', reference, target,
+                                                        vectors=vec, tot_step=total_step, rate=0.5)
+        save_path_compare_trans = f"output/registration/translation_MRI1_MRI{2 + image_index}_{total_step}step.png"
+        plot_translation(reference, relocated_target, save_path_compare_trans)
 
-
-
+        ssd_hist_rot, relocated_target = find_min_SSD('rotation', reference, target,
+                                                      vectors=deg, tot_step=total_step, rate=0.5)
+        save_path_compare_rot = f"output/registration/rotation_MRI1_MRI{2 + image_index}_{total_step}step.png"
+        plot_rotation(reference, relocated_target, save_path_compare_rot)
