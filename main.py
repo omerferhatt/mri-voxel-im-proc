@@ -95,8 +95,7 @@ def joint_histogram(arr1, arr2, bins, plot=False, save=None):
 # - Mutual Information
 
 def SSD(arr1, arr2):
-    difference = arr1 - arr2
-    return sum(sum(difference ** 2))
+    return np.sum((arr1[:, :] - arr2[:, :]) ** 2)
 
 
 def correlation(arr1, arr2):
@@ -147,11 +146,6 @@ def _create_transformation_kernel(theta, omega, phi, s=None):
                           [np.sin(phi), np.cos(phi), 0, 0],
                           [0, 0, 1, 0],
                           [0, 0, 0, 1]])
-
-    '''trans_pqr = np.array([[1,0,0,p],
-                              [0,1,0,q],
-                              [0,0,1,r],
-                              [0,0,0,1]])'''
 
     if s is not None:
         scaled_matrix = np.array([[s, 0, 0, 0],
@@ -231,58 +225,111 @@ def translation(arr, p, q):
     return z
 
 
-def rotation(arr, p, q):
-    pass
+def rotate_coords(x, y, theta, ox, oy):
+    """Rotate arrays of coordinates x and y by theta radians about the
+    point (ox, oy).
+
+    """
+    s, c = np.sin(theta), np.cos(theta)
+    x, y = np.asarray(x) - ox, np.asarray(y) - oy
+    return x * c - y * s + ox, x * s + y * c + oy
+
+
+def rotation(arr, theta, ox=0, oy=0, fill=0):
+    """Rotate the image src by theta radians about (ox, oy).
+    Pixels in the result that don't correspond to pixels in src are
+    replaced by the value fill.
+
+    """
+    # Images have origin at the top left, so negate the angle.
+    theta = theta * np.pi / 180
+    theta = -theta
+    # Dimensions of source image. Note that scipy.misc.imread loads
+    # images in row-major order, so src.shape gives (height, width).
+    sw, sh = arr.shape
+
+    # Rotated positions of the corners of the source image.
+    cx, cy = rotate_coords([0, sw, sw, 0], [0, 0, sh, sh], theta, ox, oy)
+
+    # Determine dimensions of destination image.
+    dw, dh = (int(np.ceil(c.max() - c.min())) for c in (cx, cy))
+
+    # Coordinates of pixels in destination image.
+    dx, dy = np.meshgrid(np.arange(dw), np.arange(dh))
+
+    # Corresponding coordinates in source image. Since we are
+    # transforming dest-to-src here, the rotation is negated.
+    sx, sy = rotate_coords(dx, dy, -theta, ox, oy)
+
+    # Select nearest neighbour.
+    sx, sy = sx.round().astype(int), sy.round().astype(int)
+
+    # Mask for valid coordinates.
+    mask = (0 <= sx) & (sx < sw) & (0 <= sy) & (sy < sh)
+
+    # Create destination image.
+    dest = np.empty(shape=(dh, dw), dtype=arr.dtype)
+    # Copy valid coordinates from source image.
+    dest[dy[mask], dx[mask]] = arr[sy[mask], sx[mask]]
+
+    # Fill invalid coordinates.
+    dest[dy[~mask], dx[~mask]] = fill
+    dest = dest[:256, :256]
+    return dest
 
 
 # -------- Optimization Functions -------- #
 # - Basic min loss find func
 
-def find_min_SSD(func, ref, target, vectors, tot_step=1000, rate=0.5, multiplier=1):
+def find_min_SSD(func, ref, target, vectors, tot_step=20):
     try:
-        if not (func == 'translation' or func == 'rotation'):
+        if func == 'translation':
+            init_v = [0, 0]
+        elif func == 'rotation':
+            pass
+        else:
             raise TypeError
+
     except TypeError as err:
         print('Only `translation` or `rotation` keywords supported for this function')
         print('`translation` keyword going to be used in this function for now')
+        return
 
     ssd_hist = [np.float64(SSD(ref, target))]
-    for step in range(tot_step):
+    if func == 'translation':
+        for step in range(tot_step):
+            ssd_local = []
+            for v in vectors:
+                target_test = translation(target, init_v[0] + v[0], init_v[1] + v[1])
+                ssd_local.append(SSD(ref, target_test))
+
+            init_v = np.add(np.array(vectors[np.argmin(ssd_local)]), init_v)
+            ssd_hist.append(ssd_local[np.argmin(ssd_local)])
+        new_target = translation(target, init_v[0], init_v[1])
+        return ssd_hist, new_target
+
+    if func == 'rotation':
         ssd_local = []
-        for pos in vectors:
-            if func == 'translation':
-                target_test = translation(target, 0 + pos[0], 0 + pos[1])
-            else:
-                target_test = rotation(_, _, _)
+        for d in vectors:
+            target_test = rotation(target, theta=d, ox=0, oy=0, fill=0)
             ssd_local.append(SSD(ref, target_test))
 
-        direction_index = np.argmin(ssd_local)
-        ssd_hist.append(ssd_local[direction_index])
-        if func == 'translation':
-            target = translation(target, 0 + pos[direction_index][0], 0 + pos[direction_index][1])
-        else:
-            target = rotation(_, _, _)
-
-        if step != 0 and step % 20 == 0:
-            if np.isclose(ssd_hist[-1], ssd_hist[-3]) or np.isclose(ssd_hist[-2], ssd_hist[-4]):
-                if multiplier > 0.1:
-                    multiplier *= rate
-                    pos *= multiplier
-    return ssd_hist, target
+        min_d = np.array(vectors[np.argmin(ssd_local)])
+        ssd_hist.append(ssd_local[np.argmin(ssd_local)])
+        new_target = rotation(target, theta=min_d)
+        return ssd_hist, new_target
 
 
 def create_pos_vector():
-    pos_left_down = (-1, -1)
-    pos_left_up = (-1, 1)
-    pos_right_down = (1, -1)
-    pos_right_up = (1, 1)
+    pos_left_down = (-0.5, -0.5)
+    pos_left_up = (-0.5, 0.5)
+    pos_right_down = (0.5, -0.5)
+    pos_right_up = (0.5, 0.5)
     return pos_left_down, pos_left_up, pos_right_down, pos_right_up
 
 
 def create_rot_degree():
-    rot_left = (2*np.pi)//16
-    rot_right = -rot_left
-    return rot_left, rot_right
+    return np.arange(-45, +45, 5)
 
 
 # -------- File Manipulation and Read Functions -------- #
@@ -405,7 +452,7 @@ def plot_translation(arr1, arr2, save=None):
     ax[0].imshow(arr1, cmap="gray")
     ax[1].imshow(arr2, cmap="gray")
     if save is not None:
-        plt.savefig(save, dpi=600)
+        plt.savefig(save)
     plt.show()
 
 
@@ -471,34 +518,34 @@ if __name__ == "__main__":
 
     # ---------------------------- Part 4 - Simple 2D Registration  ---------------------------- #
     # Selecting image number randomly
-    im_no = 1
+    im_no = 2
 
     # -------- Section 1 - Translation
-    trans_new = translation(MRI_images[im_no], 10, 10)
-    save_path_translation = f"output/registration/translation{im_no}.png"
+    trans_new = translation(MRI_images[im_no], p=20, q=20)
+    save_path_translation = f"output/registration/translation_MRI{im_no}.png"
     plot_translation(MRI_images[im_no], trans_new, save_path_translation)
 
     # -------- Section 2 - Rotation
-    rot_new = rotation(_, _, _)
+    rot_new = rotation(MRI_images[im_no], theta=10, ox=0, oy=0, fill=0)
     save_path_rotation = f"output/registration/rotation_MRI{im_no}.png"
-    plot_rotation(MRI_images[im_no], rot_new, save_path_translation)
+    plot_rotation(MRI_images[0], rot_new, save_path_rotation)
 
     # -------- Section 3 - 2D registrations
     reference = MRI_images[0]
     targets = MRI_images[1:]
-    total_step = 1000
+    total_step = 300
 
     # - Translation and Rotation
     vec = create_pos_vector()
     deg = create_rot_degree()
 
-    for image_index, target in enumerate(targets):
-        ssd_hist_trans, relocated_target = find_min_SSD('translation', reference, target,
-                                                        vectors=vec, tot_step=total_step, rate=0.5)
+    for image_index, tar in enumerate(targets):
+        ssd_hist_trans, relocated_target = find_min_SSD('translation', reference, tar,
+                                                        vectors=vec, tot_step=total_step)
         save_path_compare_trans = f"output/registration/translation_MRI1_MRI{2 + image_index}_{total_step}step.png"
         plot_translation(reference, relocated_target, save_path_compare_trans)
 
-        ssd_hist_rot, relocated_target = find_min_SSD('rotation', reference, target,
-                                                      vectors=deg, tot_step=total_step, rate=0.5)
+        ssd_hist_rot, relocated_target = find_min_SSD('rotation', reference, tar,
+                                                      vectors=deg, tot_step=total_step)
         save_path_compare_rot = f"output/registration/rotation_MRI1_MRI{2 + image_index}_{total_step}step.png"
         plot_rotation(reference, relocated_target, save_path_compare_rot)
