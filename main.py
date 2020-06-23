@@ -306,7 +306,7 @@ def find_min_SSD(func, ref, target, vectors, tot_step=20):
             init_v = np.add(np.array(vectors[np.argmin(ssd_local)]), init_v)
             ssd_hist.append(ssd_local[np.argmin(ssd_local)])
         new_target = translation(target, init_v[0], init_v[1])
-        return ssd_hist, new_target
+        return ssd_hist, new_target, init_v
 
     if func == 'rotation':
         ssd_local = []
@@ -316,7 +316,59 @@ def find_min_SSD(func, ref, target, vectors, tot_step=20):
 
         min_d = np.array(vectors[np.argmin(ssd_local)])
         new_target = rotation(target, theta=min_d)
-        return ssd_local, new_target
+        return ssd_local, new_target, min_d
+
+
+def gradient_descent(source, target):
+    init_tx = 5
+    init_ty = 0
+    init_degree = 10
+    step_size = 0.001
+    step_tolerance = 0.000001
+    max_iterations = 2000
+
+    source = source * (1/255)
+    target = target * (1/255)
+    source = translation(source, p=0, q=0)
+    ssd_init = SSD(source, target)
+
+    for epoch in range(max_iterations):
+        trans_x_target = translation(target, p=init_tx, q=0)
+        ssd_trans_x = SSD(source, trans_x_target)
+        tx_step = step_size * np.diff([ssd_init, ssd_trans_x])
+        init_tx -= tx_step
+
+        trans_y_target = translation(trans_x_target, p=0, q=init_ty)
+        ssd_trans_y = SSD(source, trans_y_target)
+        ty_step = step_size * np.diff([ssd_init, ssd_trans_y])
+        init_ty -= ty_step
+
+        rot_target = rotation(trans_y_target, init_degree)
+        ssd_rot = SSD(source, rot_target)
+        rot_step = step_size * np.diff([ssd_init, ssd_rot])
+        init_degree -= rot_step
+        init_degree %= 360
+
+        if epoch % 50 == 0:
+            print(f"Epoch: {epoch}")
+            print(f"SSD loss rotation: {ssd_rot}, rotation_degree = {init_degree}")
+            print(f"SSD loss translation on x: {ssd_trans_x}, orientation x = {init_tx}")
+            print(f"SSD loss translation on y: {ssd_trans_y}, orientation y = {init_ty}\n")
+
+        if epoch % 400 == 0:
+            fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+            ax[0].imshow(source * 255, cmap="gray")
+            ax[1].imshow(rot_target * 255, cmap="gray")
+            plt.title(f"Epoch: {epoch}")
+            plt.show()
+
+        if abs(rot_step) <= step_tolerance and abs(tx_step) <= step_tolerance and abs(ty_step) <= step_tolerance:
+            fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+            ax[0].imshow(source * 255, cmap="gray")
+            ax[1].imshow(rot_target * 255, cmap="gray")
+            plt.title(f"Epoch: {epoch}")
+            plt.show()
+            break
 
 
 def create_pos_vector():
@@ -481,7 +533,6 @@ def plot_hist_compare(arr1, arr2, hist, save=None):
 
 plot_degree_compare = plot_hist_compare
 
-
 # Creating alias for rotation plotting
 plot_rotation = plot_translation
 
@@ -562,17 +613,30 @@ if __name__ == "__main__":
     targets = MRI_images[1:]
     total_step = 60
 
-    # - Translation and Rotation
+    # - Translation and Rotation with custom minimizing function
     vec = create_pos_vector()
     deg = create_rot_degree()
 
+    print(f"Minimizing SSD with custom function")
+    print(f"Total step: {total_step}")
+
     for image_index, tar in enumerate(targets):
-        ssd_hist_trans, relocated_target = find_min_SSD('translation', reference, tar,
-                                                        vectors=vec, tot_step=total_step)
+        print(f"\tBrainMRI_1 - BrainMRI_{2 + image_index}")
+        print(f"\tTranslation:")
+        ssd_hist_trans, relocated_target, orientation_vec = find_min_SSD('translation', reference, tar,
+                                                                         vectors=vec, tot_step=total_step)
         save_path_compare_trans = f"output/registration/translation_MRI1_MRI{2 + image_index}.png"
         plot_hist_compare(reference, relocated_target, ssd_hist_trans[1:], save_path_compare_trans)
+        print(f"\t\tOrientation vector: {orientation_vec}")
+        print(f"\t\tMin SSD: {min(ssd_hist_trans)}")
 
-        ssd_degree_rot, relocated_target = find_min_SSD('rotation', reference, tar,
+        print(f"\tRotation:")
+        ssd_degree_rot, relocated_target, orientation_deg = find_min_SSD('rotation', reference, tar,
                                                         vectors=deg, tot_step=total_step)
         save_path_compare_rot = f"output/registration/rotation_MRI1_MRI{2 + image_index}.png"
         plot_degree_compare(reference, relocated_target, ssd_degree_rot, save_path_compare_rot)
+        print(f"\t\tOrientation degree: {orientation_deg} degree")
+        print(f"\t\tMin SSD: {min(ssd_degree_rot)}\n")
+
+    # - Translation and Rotation with gradient descent function
+    gradient_descent(MRI_images[0], MRI_images[1])
