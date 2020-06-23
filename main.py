@@ -315,9 +315,8 @@ def find_min_SSD(func, ref, target, vectors, tot_step=20):
             ssd_local.append(SSD(ref, target_test))
 
         min_d = np.array(vectors[np.argmin(ssd_local)])
-        ssd_hist.append(ssd_local[np.argmin(ssd_local)])
         new_target = rotation(target, theta=min_d)
-        return ssd_hist, new_target
+        return ssd_local, new_target
 
 
 def create_pos_vector():
@@ -329,7 +328,7 @@ def create_pos_vector():
 
 
 def create_rot_degree():
-    return np.arange(-45, +45, 5)
+    return np.arange(-180, +180, 1)
 
 
 # -------- File Manipulation and Read Functions -------- #
@@ -456,6 +455,33 @@ def plot_translation(arr1, arr2, save=None):
     plt.show()
 
 
+def plot_hist_compare(arr1, arr2, hist, save=None):
+    fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+    ax[0].imshow(arr1, cmap="gray")
+    ax[1].imshow(arr2, cmap="gray")
+    ax[0].set_xticks([])
+    ax[0].set_yticks([])
+    ax[1].set_xticks([])
+    ax[1].set_yticks([])
+
+    ax[2].plot(hist)
+    if len(hist) == 360:
+        ax[2].set_xticks(np.arange(0, 360, 45))
+        ax[2].set_xlabel("Degree")
+    else:
+        ax[2].set_xticks(np.arange(0, len(hist), 20))
+        ax[2].set_xlabel("Step")
+
+    ax[2].set_ylabel("SSD Loss")
+
+    if save is not None:
+        plt.savefig(save)
+    plt.show()
+
+
+plot_degree_compare = plot_hist_compare
+
+
 # Creating alias for rotation plotting
 plot_rotation = plot_translation
 
@@ -518,22 +544,23 @@ if __name__ == "__main__":
 
     # ---------------------------- Part 4 - Simple 2D Registration  ---------------------------- #
     # Selecting image number randomly
-    im_no = 2
+    im_no_trans = 1
+    im_no_rot = 2
 
     # -------- Section 1 - Translation
-    trans_new = translation(MRI_images[im_no], p=20, q=20)
-    save_path_translation = f"output/registration/translation_MRI{im_no}.png"
-    plot_translation(MRI_images[im_no], trans_new, save_path_translation)
+    trans_new = translation(MRI_images[im_no_trans], p=20, q=20)
+    save_path_translation = f"output/registration/translation.png"
+    plot_translation(MRI_images[0], trans_new, save_path_translation)
 
     # -------- Section 2 - Rotation
-    rot_new = rotation(MRI_images[im_no], theta=10, ox=0, oy=0, fill=0)
-    save_path_rotation = f"output/registration/rotation_MRI{im_no}.png"
+    rot_new = rotation(MRI_images[im_no_rot], theta=10, ox=0, oy=0, fill=0)
+    save_path_rotation = f"output/registration/rotation.png"
     plot_rotation(MRI_images[0], rot_new, save_path_rotation)
 
     # -------- Section 3 - 2D registrations
     reference = MRI_images[0]
     targets = MRI_images[1:]
-    total_step = 300
+    total_step = 60
 
     # - Translation and Rotation
     vec = create_pos_vector()
@@ -542,10 +569,10 @@ if __name__ == "__main__":
     for image_index, tar in enumerate(targets):
         ssd_hist_trans, relocated_target = find_min_SSD('translation', reference, tar,
                                                         vectors=vec, tot_step=total_step)
-        save_path_compare_trans = f"output/registration/translation_MRI1_MRI{2 + image_index}_{total_step}step.png"
-        plot_translation(reference, relocated_target, save_path_compare_trans)
+        save_path_compare_trans = f"output/registration/translation_MRI1_MRI{2 + image_index}.png"
+        plot_hist_compare(reference, relocated_target, ssd_hist_trans[1:], save_path_compare_trans)
 
-        ssd_hist_rot, relocated_target = find_min_SSD('rotation', reference, tar,
-                                                      vectors=deg, tot_step=total_step)
-        save_path_compare_rot = f"output/registration/rotation_MRI1_MRI{2 + image_index}_{total_step}step.png"
-        plot_rotation(reference, relocated_target, save_path_compare_rot)
+        ssd_degree_rot, relocated_target = find_min_SSD('rotation', reference, tar,
+                                                        vectors=deg, tot_step=total_step)
+        save_path_compare_rot = f"output/registration/rotation_MRI1_MRI{2 + image_index}.png"
+        plot_degree_compare(reference, relocated_target, ssd_degree_rot, save_path_compare_rot)
